@@ -65,6 +65,7 @@ if __name__ == "__main__":
     main()
 
 
+import os
 from flask import Flask
 import threading
 
@@ -75,7 +76,8 @@ def home():
     return "Bot is running!"
 
 def run_flask():
-    app.run(host="0.0.0.0", port=8080)
+    port = int(os.environ.get("PORT", 8080))  # Use Render's assigned port
+    app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask).start()
