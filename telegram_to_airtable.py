@@ -52,6 +52,7 @@ async def handle_message(update: Update, context: CallbackContext):
 
 # Function to start the bot
 def main():
+    print(f"DEBUG: Telegram Bot Token is {TOKEN}")
     app = Application.builder().token(TOKEN).build()
 
     # Add handler for text messages
