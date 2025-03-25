@@ -2,7 +2,7 @@ import os
 import requests
 import datetime
 from telegram import Update
-from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
+from telegram.ext import Application, MessageHandler, filters, CommandHandler, CallbackContext
 
 # Get environment variables (used when deploying)
 TOKEN = os.getenv("7899090667:AAHQIvcXTi6BwMOhjXU6vrmpcfWy7Y0WcuE")
@@ -36,7 +36,7 @@ def save_to_airtable(user_id, name, message):
     return response.status_code
 
 # Function to handle incoming messages
-def handle_message(update: Update, context: CallbackContext):
+async def handle_message(update: Update, context: CallbackContext):
     user = update.message.from_user
     user_id = user.id
     name = f"{user.first_name} {user.last_name or ''}".strip()
@@ -46,17 +46,19 @@ def handle_message(update: Update, context: CallbackContext):
     status = save_to_airtable(user_id, name, message)
 
     if status == 200:
-        update.message.reply_text("✅ Your message has been saved!")
+        await update.message.reply_text("✅ Your message has been saved!")
     else:
-        update.message.reply_text("❌ Failed to save your message.")
+        await update.message.reply_text("❌ Failed to save your message.")
 
-# Set up the bot
-updater = Updater(TOKEN, use_context=True)
-dispatcher = updater.dispatcher
+# Function to start the bot
+def main():
+    app = Application.builder().token(TOKEN).build()
 
-# Add handler for text messages
-dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    # Add handler for text messages
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Start the bot
-updater.start_polling()
-updater.idle()
+    print("Bot is running...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
