@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, CallbackContext
 
 # Get environment variables (used when deploying)
-TOKEN = os.getenv("7899090667:AAHQIvcXTi6BwMOhjXU6vrmpcfWy7Y0WcuE")
+TOKEN = "7899090667:AAHQIvcXTi6BwMOhjXU6vrmpcfWy7Y0WcuE"
 AIRTABLE_API_KEY = os.getenv("pate0GC1BzjAGkDSy.0efd2d0e5b409a02b09f2b36a84cb6c7db5f15da73088d49af5408fa3c93dff8")
 BASE_ID = os.getenv("appzlZFE8pqIu8fOi")
 TABLE_NAME = "Telegram messages"  # Ensure this matches your Airtable table name
