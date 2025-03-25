@@ -67,7 +67,9 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Set webhook and start webhook listener
-    app.bot.loop.run_until_complete(set_webhook(app))
+   import asyncio
+    asyncio.run(set_webhook(app))
+
     app.run_webhook(listen="0.0.0.0", port=int(os.getenv("PORT", 8080)), webhook_url=WEBHOOK_URL)
 
 # Fake web server for Render (required to avoid port errors)
