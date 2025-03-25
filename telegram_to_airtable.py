@@ -2,13 +2,16 @@ import os
 import requests
 import datetime
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, CommandHandler, CallbackContext
+from telegram.ext import Application, MessageHandler, filters, CallbackContext
+from flask import Flask
+import threading
 
-# Get environment variables (used when deploying)
-TOKEN = "7899090667:AAHQIvcXTi6BwMOhjXU6vrmpcfWy7Y0WcuE"
-AIRTABLE_API_KEY = os.getenv("pate0GC1BzjAGkDSy.0efd2d0e5b409a02b09f2b36a84cb6c7db5f15da73088d49af5408fa3c93dff8")
-BASE_ID = os.getenv("appzlZFE8pqIu8fOi")
-TABLE_NAME = "Telegram messages"  # Ensure this matches your Airtable table name
+# Get environment variables securely
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
+BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+TABLE_NAME = "Telegram messages"
 
 # Airtable API URL
 AIRTABLE_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
@@ -31,7 +34,6 @@ def save_to_airtable(user_id, name, message):
             }
         ]
     }
-    
     response = requests.post(AIRTABLE_URL, json=data, headers=headers)
     return response.status_code
 
@@ -50,25 +52,25 @@ async def handle_message(update: Update, context: CallbackContext):
     else:
         await update.message.reply_text("❌ Failed to save your message.")
 
-# Function to start the bot
-def main():
-    print(f"DEBUG: Telegram Bot Token is {TOKEN}")
-    app = Application.builder().token(TOKEN).build()
+# Function to set up the Telegram webhook
+async def set_webhook(application):
+    if WEBHOOK_URL:
+        await application.bot.set_webhook(url=WEBHOOK_URL)
+        print(f"✅ Webhook set: {WEBHOOK_URL}")
+    else:
+        print("❌ ERROR: WEBHOOK_URL is missing!")
 
-    # Add handler for text messages
+# Function to start the bot using webhooks
+def main():
+    print("🚀 Starting bot...")
+    app = Application.builder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Bot is running...")
-    app.run_polling()
+    # Set webhook and start webhook listener
+    app.bot.loop.run_until_complete(set_webhook(app))
+    app.run_webhook(listen="0.0.0.0", port=int(os.getenv("PORT", 8080)), webhook_url=WEBHOOK_URL)
 
-if __name__ == "__main__":
-    main()
-
-
-import os
-from flask import Flask
-import threading
-
+# Fake web server for Render (required to avoid port errors)
 app = Flask(__name__)
 
 @app.route('/')
@@ -76,7 +78,7 @@ def home():
     return "Bot is running!"
 
 def run_flask():
-    port = int(os.environ.get("PORT", 8080))  # Use Render's assigned port
+    port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
