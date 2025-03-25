@@ -70,7 +70,7 @@ def main():
 import asyncio
 asyncio.run(set_webhook(app))
 
-    app.run_webhook(listen="0.0.0.0", port=int(os.getenv("PORT", 8080)), webhook_url=WEBHOOK_URL)
+app.run_webhook(listen="0.0.0.0", port=int(os.getenv("PORT", 8080)), webhook_url=WEBHOOK_URL)
 
 # Fake web server for Render (required to avoid port errors)
 app = Flask(__name__)
