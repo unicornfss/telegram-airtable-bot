@@ -94,11 +94,14 @@ def telegram_webhook():
 
         update = Update.de_json(json_data, bot_app.bot)
 
-        # Ensure safe event loop handling
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # **Properly handle the event loop**
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
         loop.run_until_complete(bot_app.process_update(update))
-        loop.close()
 
         return jsonify({"status": "success"}), 200
     except Exception as e:
@@ -122,9 +125,10 @@ def start_bot():
     try:
         bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-        # Use `asyncio.get_event_loop()` to prevent closed loop issues
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
+        # **Ensure the event loop is properly handled**
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
 
@@ -132,7 +136,11 @@ def start_bot():
         loop.run_until_complete(set_webhook())
 
         logger.info("✅ Webhook is ready. Running bot with Flask...")
-        threading.Thread(target=start_flask).start()
+        threading.Thread(target=start_flask, daemon=True).start()
+
+        # **Keep bot running indefinitely**
+        loop.run_forever()
+
     except Exception as e:
         logger.error(f"🚨 Bot Startup Error: {e}")
 
