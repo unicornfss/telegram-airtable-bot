@@ -107,18 +107,18 @@ def start_flask():
     app.run(host="0.0.0.0", port=port, debug=False)
 
 
+import asyncio
+
 def start_bot():
     """Starts the Telegram bot with webhook mode."""
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # ✅ Fix: Properly initialize the bot
-    asyncio.run(bot_app.initialize())  # Ensure initialization is awaited
-    asyncio.run(set_webhook())  # Ensure webhook is set correctly
+    # ✅ Initialize inside the existing event loop
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(bot_app.initialize())  
+    loop.run_until_complete(set_webhook())  # Set the webhook properly
 
     logger.info("✅ Webhook is ready. Running bot with Flask...")
     threading.Thread(target=start_flask).start()
 
-
-if __name__ == "__main__":
-    start_bot()
 
