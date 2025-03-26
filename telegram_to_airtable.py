@@ -70,6 +70,9 @@ def start_bot():
     # Add handler for text messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    # ✅ Properly initialize the application
+    app.initialize()
+
     # ✅ Ensure there's a running event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -95,10 +98,9 @@ def telegram_webhook():
     data = request.get_json()
     update = Update.de_json(data, app.bot)
 
-    # ✅ Run task in the correct event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(app.process_update(update))
+    # ✅ Process the update safely using the running event loop
+    loop = asyncio.get_event_loop()
+    asyncio.run_coroutine_threadsafe(app.process_update(update), loop)
 
     return "OK", 200
 
