@@ -17,10 +17,12 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 TABLE_NAME = "Telegram messages"
+INSTRUCTOR_TABLE = "Instructor"
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# Airtable API URL
-AIRTABLE_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
+# Airtable API URLs
+AIRTABLE_MESSAGES_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
+AIRTABLE_INSTRUCTORS_URL = f"https://api.airtable.com/v0/{BASE_ID}/{INSTRUCTOR_TABLE}"
 
 # Flask app for handling webhook
 app = Flask(__name__)
@@ -48,7 +50,7 @@ def save_to_airtable(user_id, name, message):
         "records": [
             {
                 "fields": {
-                    "User ID": f"{user_id}",  # Ensure ID is stored as a string
+                    "User ID": f"{user_id}",
                     "Name": name,
                     "Message": message,
                     "Timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -58,8 +60,8 @@ def save_to_airtable(user_id, name, message):
     }
 
     try:
-        response = requests.post(AIRTABLE_URL, json=data, headers=headers)
-        response_json = response.json()  # Convert response to JSON
+        response = requests.post(AIRTABLE_MESSAGES_URL, json=data, headers=headers)
+        response_json = response.json()
 
         if response.status_code == 200:
             logger.info(f"✅ Airtable Save Successful: {response_json}")
@@ -72,6 +74,38 @@ def save_to_airtable(user_id, name, message):
         return 500
 
 
+def find_instructor(name=None, email=None):
+    """Find an instructor by name or email."""
+    headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
+    
+    filter_formula = []
+    if name:
+        filter_formula.append(f"{{Name}}='{name}'")
+    if email:
+        filter_formula.append(f"{{Email}}='{email}'")
+
+    filter_query = "AND(" + ",".join(filter_formula) + ")" if filter_formula else ""
+    
+    response = requests.get(AIRTABLE_INSTRUCTORS_URL, headers=headers, params={"filterByFormula": filter_query})
+    records = response.json().get("records", [])
+    
+    return records[0] if records else None
+
+
+def update_instructor_telegram_id(record_id, telegram_id):
+    """Updates an instructor's Telegram ID."""
+    headers = {
+        "Authorization": f"Bearer {AIRTABLE_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "records": [
+            {"id": record_id, "fields": {"Telegram ID": str(telegram_id)}}
+        ]
+    }
+    response = requests.patch(AIRTABLE_INSTRUCTORS_URL, json=data, headers=headers)
+    return response.status_code == 200
+
 
 async def handle_message(update: Update, context: CallbackContext):
     """Handles incoming messages."""
@@ -79,17 +113,57 @@ async def handle_message(update: Update, context: CallbackContext):
         user = update.message.from_user
         user_id = user.id
         name = f"{user.first_name} {user.last_name or ''}".strip()
-        message = update.message.text
+        message = update.message.text.strip().lower()
 
         logger.info(f"📩 Message from {name} ({user_id}): {message}")
 
-        # Save to Airtable
-        status = save_to_airtable(user_id, name, message)
+        # Registration Process
+        if message in ["add me", "register"]:
+            await update.message.reply_text("📝 Please send your full name as registered in the system.")
+            context.user_data["registration_step"] = "awaiting_name"
+            return
 
+        if "registration_step" in context.user_data:
+            step = context.user_data["registration_step"]
+
+            if step == "awaiting_name":
+                context.user_data["name"] = message
+                instructor = find_instructor(name=message)
+
+                if not instructor:
+                    await update.message.reply_text("❌ Name not found in database. Please contact the office.")
+                    del context.user_data["registration_step"]
+                    return
+
+                context.user_data["registration_step"] = "awaiting_email"
+                context.user_data["instructor_id"] = instructor["id"]
+                await update.message.reply_text("📧 Please send your registered email address.")
+                return
+
+            if step == "awaiting_email":
+                instructor_id = context.user_data["instructor_id"]
+                instructor = find_instructor(email=message)
+
+                if not instructor or instructor["id"] != instructor_id:
+                    await update.message.reply_text("❌ Name / Email mismatch. Please try again or contact the office.")
+                    del context.user_data["registration_step"]
+                    return
+
+                if update_instructor_telegram_id(instructor_id, user_id):
+                    await update.message.reply_text("✅ Registration successful! You are now linked with Telegram.")
+                else:
+                    await update.message.reply_text("❌ Failed to update Telegram ID. Please contact the office.")
+
+                del context.user_data["registration_step"]
+                return
+
+        # Save messages to Airtable
+        status = save_to_airtable(user_id, name, message)
         if status == 200:
             await update.message.reply_text("✅ Your message has been saved!")
         else:
             await update.message.reply_text("❌ Failed to save your message.")
+
     except Exception as e:
         logger.error(f"🚨 Message Handling Error: {e}")
 
@@ -103,7 +177,6 @@ def telegram_webhook():
 
         update = Update.de_json(json_data, bot_app.bot)
 
-        # **Properly handle the event loop**
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -134,7 +207,6 @@ def start_bot():
     try:
         bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-        # **Ensure the event loop is properly handled**
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -147,7 +219,6 @@ def start_bot():
         logger.info("✅ Webhook is ready. Running bot with Flask...")
         threading.Thread(target=start_flask, daemon=True).start()
 
-        # **Keep bot running indefinitely**
         loop.run_forever()
 
     except Exception as e:
