@@ -92,6 +92,7 @@ def home():
     return "Bot is running!"
 
 @flask_app.route('/webhook', methods=['POST'])
+@flask_app.route('/webhook', methods=['POST'])
 def telegram_webhook():
     """ Handle incoming Telegram messages via webhook """
     data = request.get_json()
@@ -100,13 +101,14 @@ def telegram_webhook():
     try:
         update = Update.de_json(data, app.bot)
 
-        # ✅ Run the update processing using Flask’s async-to-sync helper
+        # ✅ Process updates inside the event loop
         loop.create_task(app.process_update(update))
 
         return "OK", 200
     except Exception as e:
         print(f"❌ Webhook Processing Error: {e}")  # Debugging log
         return "Error", 500
+
 
 def run_flask():
     port = int(os.getenv("PORT", 8080))
