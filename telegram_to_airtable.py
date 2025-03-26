@@ -77,14 +77,20 @@ def save_to_airtable(user_id, name, message):
 
 
 def lookup_instructor(name):
-    """Checks if the instructor exists in Airtable."""
+    """Checks if the instructor exists in Airtable (case-insensitive match)."""
     headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
-    response = requests.get(f"{INSTRUCTOR_URL}?filterByFormula={{Name}}='{name}'", headers=headers)
+    
+    # Airtable filter formula (escaping single quotes)
+    formula = f"FIND(LOWER('{name}'), LOWER({{Name}})) > 0"
+    url = f"{INSTRUCTOR_URL}?filterByFormula={formula}"
+    
+    response = requests.get(url, headers=headers)
     data = response.json()
 
     if "records" in data and len(data["records"]) > 0:
         return data["records"][0]  # Return the first match
     return None
+
 
 
 def update_instructor_telegram_id(record_id, telegram_id):
