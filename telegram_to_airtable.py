@@ -33,14 +33,27 @@ def main():
     asyncio.run(set_webhook(app))
 
     print("✅ Webhook is ready. Running bot with Flask...")
-    app.run_webhook(listen="0.0.0.0", port=int(os.getenv("PORT", 8080)), webhook_url=WEBHOOK_URL)
+    app.run_webhook(
+    listen="0.0.0.0",
+    port=int(os.getenv("PORT", 8080)),
+    webhook_url=f"{WEBHOOK_URL}/webhook"
+)
+
 
 # Fake web server to avoid Render errors
 flask_app = Flask(__name__)
 
-@flask_app.route('/')
+@flask_app.route('/', methods=['GET'])
 def home():
     return "Bot is running!"
+
+@flask_app.route('/webhook', methods=['POST'])
+async def telegram_webhook():
+    """ Handle incoming Telegram messages via webhook """
+    update = Update.de_json(await flask_app.request.get_json(), bot)
+    await app.process_update(update)
+    return "OK", 200
+
 
 def run_flask():
     port = int(os.getenv("PORT", 8080))
