@@ -1,31 +1,45 @@
 import os
 import requests
 import datetime
+import logging
 import asyncio
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, CallbackContext
-from flask import Flask, request
+from telegram.ext import Application, MessageHandler, filters, CommandHandler, CallbackContext
+from flask import Flask, request, jsonify
 import threading
+
+# Enable logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Get environment variables
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 TABLE_NAME = "Telegram messages"
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 # Airtable API URL
 AIRTABLE_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
 
-# ✅ Create a global asyncio event loop
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
+# Flask app for handling webhook
+app = Flask(__name__)
 
-# Initialize the bot application
-app = Application.builder().token(TOKEN).build()
+# Telegram bot application
+bot_app = Application.builder().token(TOKEN).build()
 
-# ✅ Function to save messages to Airtable
+
+async def set_webhook():
+    """Sets the webhook for Telegram Bot."""
+    if WEBHOOK_URL:
+        await bot_app.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+        logger.info(f"✅ Webhook set: {WEBHOOK_URL}/webhook")
+    else:
+        logger.error("❌ ERROR: WEBHOOK_URL is missing!")
+
+
 def save_to_airtable(user_id, name, message):
+    """Saves messages to Airtable."""
     headers = {
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
         "Content-Type": "application/json"
@@ -45,81 +59,58 @@ def save_to_airtable(user_id, name, message):
     response = requests.post(AIRTABLE_URL, json=data, headers=headers)
     return response.status_code
 
-# ✅ Function to handle incoming messages
+
 async def handle_message(update: Update, context: CallbackContext):
+    """Handles incoming messages."""
     user = update.message.from_user
     user_id = user.id
     name = f"{user.first_name} {user.last_name or ''}".strip()
     message = update.message.text
 
-    print(f"📩 New Message Received: {message} from {name} (ID: {user_id})")
+    logger.info(f"📩 Message from {name} ({user_id}): {message}")
 
     # Save to Airtable
     status = save_to_airtable(user_id, name, message)
 
     if status == 200:
-        print("✅ Message saved to Airtable!")
         await update.message.reply_text("✅ Your message has been saved!")
     else:
-        print("❌ Airtable save failed!")
         await update.message.reply_text("❌ Failed to save your message.")
 
+    return "OK", 200
 
-# ✅ Function to set up the webhook
-async def set_webhook():
-    if WEBHOOK_URL:
-        await app.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
-        print(f"✅ Webhook set: {WEBHOOK_URL}/webhook")
-    else:
-        print("❌ ERROR: WEBHOOK_URL is missing!")
 
-def start_bot():
-    print("🚀 Starting bot...")
+@app.route('/webhook', methods=['POST'])
+async def telegram_webhook():
+    """Handles incoming Telegram updates."""
+    try:
+        update = Update.de_json(request.get_json(), bot_app.bot)
+        await bot_app.process_update(update)
+        return jsonify({"status": "success"}), 200
+    except Exception as e:
+        logger.error(f"🚨 Webhook Error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-    # Add handler for text messages
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # ✅ Ensure there's a running event loop
-    loop.run_until_complete(set_webhook())
-
-    print("✅ Webhook is ready. Running bot with Flask...")
-
-# ✅ Flask app to handle web requests
-flask_app = Flask(__name__)
-
-@flask_app.route('/', methods=['GET'])
+@app.route('/')
 def home():
     return "Bot is running!"
 
-@flask_app.route('/webhook', methods=['POST'])
-def telegram_webhook():
-    """ Handle incoming Telegram messages via webhook """
-    try:
-        data = request.get_json()
-        print(f"🔍 RAW Webhook Data Received: {data}")  # Debugging log
 
-        if not data:
-            print("❌ ERROR: No data received from Telegram!")
-            return "No Data", 400
-
-        update = Update.de_json(data, app.bot)
-        print(f"📩 Processed Update: {update}")
-
-        # ✅ Process updates inside the event loop
-        loop.create_task(app.process_update(update))
-
-        return "OK", 200
-
-    except Exception as e:
-        print(f"❌ Webhook Processing Error: {e}")  # Debugging log
-        return "Error", 500
-
-
-
-def run_flask():
+def start_flask():
+    """Runs the Flask server in a separate thread."""
     port = int(os.getenv("PORT", 8080))
-    flask_app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False)
+
+
+def start_bot():
+    """Starts the Telegram bot with webhook mode."""
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    asyncio.run(set_webhook())
+
+    logger.info("✅ Webhook is ready. Running bot with Flask...")
+    threading.Thread(target=start_flask).start()
+
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask).start()
     start_bot()
