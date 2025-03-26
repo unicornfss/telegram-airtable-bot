@@ -25,7 +25,7 @@ AIRTABLE_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
 # Flask app for handling webhook
 app = Flask(__name__)
 
-# Telegram bot application
+# Telegram bot application (properly initialized)
 bot_app = Application.builder().token(TOKEN).build()
 
 
@@ -77,15 +77,19 @@ async def handle_message(update: Update, context: CallbackContext):
     else:
         await update.message.reply_text("❌ Failed to save your message.")
 
-    return "OK", 200
-
 
 @app.route('/webhook', methods=['POST'])
-async def telegram_webhook():
-    """Handles incoming Telegram updates."""
+def telegram_webhook():
+    """Handles incoming Telegram updates (FIXED)."""
     try:
-        update = Update.de_json(request.get_json(), bot_app.bot)
-        await bot_app.process_update(update)
+        json_data = request.get_json()
+        logger.info(f"📩 Incoming Webhook Data: {json_data}")
+
+        update = Update.de_json(json_data, bot_app.bot)
+
+        # Process the update inside the event loop
+        asyncio.run(bot_app.process_update(update))
+
         return jsonify({"status": "success"}), 200
     except Exception as e:
         logger.error(f"🚨 Webhook Error: {e}")
@@ -106,6 +110,9 @@ def start_flask():
 def start_bot():
     """Starts the Telegram bot with webhook mode."""
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # 🔥 FIX: Properly initialize the bot
+    bot_app.initialize()
     asyncio.run(set_webhook())
 
     logger.info("✅ Webhook is ready. Running bot with Flask...")
