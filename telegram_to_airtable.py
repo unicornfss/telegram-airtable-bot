@@ -79,16 +79,16 @@ async def handle_message(update: Update, context: CallbackContext):
 
 
 @app.route('/webhook', methods=['POST'])
-def telegram_webhook():
-    """Handles incoming Telegram updates (FIXED)."""
+async def telegram_webhook():
+    """Handles incoming Telegram updates (Fixed for async Flask)."""
     try:
         json_data = request.get_json()
         logger.info(f"📩 Incoming Webhook Data: {json_data}")
 
         update = Update.de_json(json_data, bot_app.bot)
 
-        # Process the update inside the event loop
-        asyncio.run(bot_app.process_update(update))
+        # ✅ Instead of asyncio.run(), use create_task to process updates safely.
+        asyncio.create_task(bot_app.process_update(update))
 
         return jsonify({"status": "success"}), 200
     except Exception as e:
@@ -107,14 +107,13 @@ def start_flask():
     app.run(host="0.0.0.0", port=port, debug=False)
 
 
-import asyncio
-
 def start_bot():
     """Starts the Telegram bot with webhook mode."""
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # ✅ Initialize inside the existing event loop
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()  # Use a fresh event loop
+    asyncio.set_event_loop(loop)  
     loop.run_until_complete(bot_app.initialize())  
     loop.run_until_complete(set_webhook())  # Set the webhook properly
 
@@ -122,3 +121,5 @@ def start_bot():
     threading.Thread(target=start_flask).start()
 
 
+if __name__ == "__main__":
+    start_bot()
