@@ -79,11 +79,6 @@ def start_bot():
     loop.run_until_complete(set_webhook())
 
     print("✅ Webhook is ready. Running bot with Flask...")
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.getenv("PORT", 8080)),
-        webhook_url=f"{WEBHOOK_URL}/webhook"
-    )
 
 # Flask app to handle web requests
 flask_app = Flask(__name__)
@@ -98,11 +93,8 @@ def telegram_webhook():
     data = request.get_json()
     update = Update.de_json(data, app.bot)
 
-    # ✅ Ensure an event loop is available in the thread
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(app.process_update(update))
-    loop.close()
+    # ✅ Process the update safely using the running event loop
+    asyncio.run_coroutine_threadsafe(app.process_update(update), app._loop)
 
     return "OK", 200
 
