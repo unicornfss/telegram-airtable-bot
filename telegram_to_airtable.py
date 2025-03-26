@@ -17,6 +17,9 @@ TABLE_NAME = "Telegram messages"
 # Airtable API URL
 AIRTABLE_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
 
+# Initialize the bot application globally
+app = Application.builder().token(TOKEN).build()
+
 # Function to save messages to Airtable
 def save_to_airtable(user_id, name, message):
     headers = {
@@ -54,23 +57,21 @@ async def handle_message(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Failed to save your message.")
 
 # Function to set up the webhook
-async def set_webhook(application):
+async def set_webhook():
     if WEBHOOK_URL:
-        await application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+        await app.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
         print(f"✅ Webhook set: {WEBHOOK_URL}/webhook")
     else:
         print("❌ ERROR: WEBHOOK_URL is missing!")
 
 def start_bot():
     print("🚀 Starting bot...")
-    global app
-    app = Application.builder().token(TOKEN).build()
 
     # Add handler for text messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # ✅ Set webhook AFTER app is defined
-    asyncio.run(set_webhook(app))
+    # Start webhook setup in the background
+    asyncio.create_task(set_webhook())
 
     print("✅ Webhook is ready. Running bot with Flask...")
     app.run_webhook(
@@ -87,11 +88,14 @@ def home():
     return "Bot is running!"
 
 @flask_app.route('/webhook', methods=['POST'])
-def telegram_webhook():
+async def telegram_webhook():
     """ Handle incoming Telegram messages via webhook """
     data = request.get_json()
     update = Update.de_json(data, app.bot)
-    asyncio.run(app.process_update(update))
+    
+    # Process update without blocking the event loop
+    asyncio.create_task(app.process_update(update))
+
     return "OK", 200
 
 def run_flask():
