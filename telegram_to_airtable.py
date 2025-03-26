@@ -70,8 +70,10 @@ def start_bot():
     # Add handler for text messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Start webhook setup in the background
-    asyncio.create_task(set_webhook())
+    # ✅ Ensure there's a running event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(set_webhook())
 
     print("✅ Webhook is ready. Running bot with Flask...")
     app.run_webhook(
@@ -88,13 +90,15 @@ def home():
     return "Bot is running!"
 
 @flask_app.route('/webhook', methods=['POST'])
-async def telegram_webhook():
+def telegram_webhook():
     """ Handle incoming Telegram messages via webhook """
     data = request.get_json()
     update = Update.de_json(data, app.bot)
-    
-    # Process update without blocking the event loop
-    asyncio.create_task(app.process_update(update))
+
+    # ✅ Run task in the correct event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(app.process_update(update))
 
     return "OK", 200
 
