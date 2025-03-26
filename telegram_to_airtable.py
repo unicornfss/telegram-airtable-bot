@@ -39,7 +39,7 @@ async def set_webhook():
 
 
 def save_to_airtable(user_id, name, message):
-    """Saves messages to Airtable."""
+    """Saves messages to Airtable and logs the response for debugging."""
     headers = {
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
         "Content-Type": "application/json"
@@ -48,20 +48,29 @@ def save_to_airtable(user_id, name, message):
         "records": [
             {
                 "fields": {
-                    "User ID": user_id,
+                    "User ID": str(user_id),  # Ensure ID is a string
                     "Name": name,
                     "Message": message,
-                    "Timestamp": datetime.datetime.now().isoformat()
+                    "Timestamp": datetime.datetime.utcnow().isoformat()  # Use UTC time
                 }
             }
         ]
     }
+
     try:
         response = requests.post(AIRTABLE_URL, json=data, headers=headers)
-        return response.status_code
-    except requests.RequestException as e:
-        logger.error(f"❌ Airtable Error: {e}")
+        response_json = response.json()  # Convert response to JSON
+
+        if response.status_code == 200:
+            logger.info(f"✅ Airtable Save Successful: {response_json}")
+            return 200
+        else:
+            logger.error(f"❌ Airtable Save Failed! Status: {response.status_code}, Response: {response_json}")
+            return response.status_code
+    except Exception as e:
+        logger.error(f"🚨 Airtable Request Exception: {e}")
         return 500
+
 
 
 async def handle_message(update: Update, context: CallbackContext):
