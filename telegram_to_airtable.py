@@ -92,22 +92,28 @@ def home():
     return "Bot is running!"
 
 @flask_app.route('/webhook', methods=['POST'])
-@flask_app.route('/webhook', methods=['POST'])
 def telegram_webhook():
     """ Handle incoming Telegram messages via webhook """
-    data = request.get_json()
-    print(f"🔍 Received Webhook Data: {data}")  # Debugging log
-
     try:
+        data = request.get_json()
+        print(f"🔍 RAW Webhook Data Received: {data}")  # Debugging log
+
+        if not data:
+            print("❌ ERROR: No data received from Telegram!")
+            return "No Data", 400
+
         update = Update.de_json(data, app.bot)
+        print(f"📩 Processed Update: {update}")
 
         # ✅ Process updates inside the event loop
         loop.create_task(app.process_update(update))
 
         return "OK", 200
+
     except Exception as e:
         print(f"❌ Webhook Processing Error: {e}")  # Debugging log
         return "Error", 500
+
 
 
 def run_flask():
