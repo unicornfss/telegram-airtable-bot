@@ -17,18 +17,21 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 TABLE_NAME = "Telegram messages"
-INSTRUCTOR_TABLE = "Instructor"
+INSTRUCTOR_TABLE = "Instructor"  # Instructor table for registration
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 # Airtable API URLs
-AIRTABLE_MESSAGES_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
-AIRTABLE_INSTRUCTORS_URL = f"https://api.airtable.com/v0/{BASE_ID}/{INSTRUCTOR_TABLE}"
+AIRTABLE_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
+INSTRUCTOR_URL = f"https://api.airtable.com/v0/{BASE_ID}/{INSTRUCTOR_TABLE}"
 
 # Flask app for handling webhook
 app = Flask(__name__)
 
 # Telegram bot application
 bot_app = Application.builder().token(TOKEN).build()
+
+# Store user registration steps
+user_states = {}
 
 
 async def set_webhook():
@@ -41,7 +44,7 @@ async def set_webhook():
 
 
 def save_to_airtable(user_id, name, message):
-    """Saves messages to Airtable and logs the response for debugging."""
+    """Saves messages to Airtable."""
     headers = {
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
         "Content-Type": "application/json"
@@ -60,9 +63,8 @@ def save_to_airtable(user_id, name, message):
     }
 
     try:
-        response = requests.post(AIRTABLE_MESSAGES_URL, json=data, headers=headers)
+        response = requests.post(AIRTABLE_URL, json=data, headers=headers)
         response_json = response.json()
-
         if response.status_code == 200:
             logger.info(f"✅ Airtable Save Successful: {response_json}")
             return 200
@@ -74,36 +76,25 @@ def save_to_airtable(user_id, name, message):
         return 500
 
 
-def find_instructor(name=None, email=None):
-    """Find an instructor by name or email."""
+def lookup_instructor(name):
+    """Checks if the instructor exists in Airtable."""
     headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
-    
-    filter_formula = []
-    if name:
-        filter_formula.append(f"{{Name}}='{name}'")
-    if email:
-        filter_formula.append(f"{{Email}}='{email}'")
+    response = requests.get(f"{INSTRUCTOR_URL}?filterByFormula={{Name}}='{name}'", headers=headers)
+    data = response.json()
 
-    filter_query = "AND(" + ",".join(filter_formula) + ")" if filter_formula else ""
-    
-    response = requests.get(AIRTABLE_INSTRUCTORS_URL, headers=headers, params={"filterByFormula": filter_query})
-    records = response.json().get("records", [])
-    
-    return records[0] if records else None
+    if "records" in data and len(data["records"]) > 0:
+        return data["records"][0]  # Return the first match
+    return None
 
 
 def update_instructor_telegram_id(record_id, telegram_id):
-    """Updates an instructor's Telegram ID."""
+    """Updates the instructor's Telegram ID in Airtable."""
     headers = {
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
         "Content-Type": "application/json"
     }
-    data = {
-        "records": [
-            {"id": record_id, "fields": {"Telegram ID": str(telegram_id)}}
-        ]
-    }
-    response = requests.patch(AIRTABLE_INSTRUCTORS_URL, json=data, headers=headers)
+    data = {"records": [{"id": record_id, "fields": {"Telegram ID": str(telegram_id)}}]}
+    response = requests.patch(INSTRUCTOR_URL, json=data, headers=headers)
     return response.status_code == 200
 
 
@@ -112,53 +103,49 @@ async def handle_message(update: Update, context: CallbackContext):
     try:
         user = update.message.from_user
         user_id = user.id
-        name = f"{user.first_name} {user.last_name or ''}".strip()
         message = update.message.text.strip().lower()
 
-        logger.info(f"📩 Message from {name} ({user_id}): {message}")
+        logger.info(f"📩 Message from {user_id}: {message}")
 
-        # Registration Process
-        if message in ["add me", "register"]:
-            await update.message.reply_text("📝 Please send your full name as registered in the system.")
-            context.user_data["registration_step"] = "awaiting_name"
+        # **Registration Process**
+        if user_id in user_states:
+            step = user_states[user_id]["step"]
+
+            if step == "ask_name":
+                instructor = lookup_instructor(message)
+                if instructor:
+                    user_states[user_id] = {"step": "ask_email", "name": message, "record_id": instructor["id"]}
+                    await update.message.reply_text("✅ Name found! Please send your email address.")
+                else:
+                    await update.message.reply_text("❌ Name not found in database. Please contact the office.")
+                    del user_states[user_id]
+                return
+
+            if step == "ask_email":
+                record_id = user_states[user_id]["record_id"]
+                name = user_states[user_id]["name"]
+                instructor = lookup_instructor(name)
+
+                if instructor and instructor["fields"].get("Email", "").lower() == message.lower():
+                    if update_instructor_telegram_id(record_id, user_id):
+                        await update.message.reply_text("✅ Registration complete! Your Telegram ID has been saved.")
+                    else:
+                        await update.message.reply_text("❌ Failed to save your Telegram ID. Try again later.")
+                else:
+                    await update.message.reply_text("❌ Name / Email mismatch. Please try again or contact office.")
+
+                del user_states[user_id]
+                return
+
+        # **Check for "register" or "add me"**
+        if message in ["register", "add me", "signup", "join"]:
+            user_states[user_id] = {"step": "ask_name"}
+            await update.message.reply_text("🔹 Please send your full name as it appears in our database.")
             return
 
-        if "registration_step" in context.user_data:
-            step = context.user_data["registration_step"]
+        # **Save all other messages to Airtable**
+        status = save_to_airtable(user_id, user.first_name, message)
 
-            if step == "awaiting_name":
-                context.user_data["name"] = message
-                instructor = find_instructor(name=message)
-
-                if not instructor:
-                    await update.message.reply_text("❌ Name not found in database. Please contact the office.")
-                    del context.user_data["registration_step"]
-                    return
-
-                context.user_data["registration_step"] = "awaiting_email"
-                context.user_data["instructor_id"] = instructor["id"]
-                await update.message.reply_text("📧 Please send your registered email address.")
-                return
-
-            if step == "awaiting_email":
-                instructor_id = context.user_data["instructor_id"]
-                instructor = find_instructor(email=message)
-
-                if not instructor or instructor["id"] != instructor_id:
-                    await update.message.reply_text("❌ Name / Email mismatch. Please try again or contact the office.")
-                    del context.user_data["registration_step"]
-                    return
-
-                if update_instructor_telegram_id(instructor_id, user_id):
-                    await update.message.reply_text("✅ Registration successful! You are now linked with Telegram.")
-                else:
-                    await update.message.reply_text("❌ Failed to update Telegram ID. Please contact the office.")
-
-                del context.user_data["registration_step"]
-                return
-
-        # Save messages to Airtable
-        status = save_to_airtable(user_id, name, message)
         if status == 200:
             await update.message.reply_text("✅ Your message has been saved!")
         else:
@@ -177,6 +164,7 @@ def telegram_webhook():
 
         update = Update.de_json(json_data, bot_app.bot)
 
+        # **Properly handle the event loop**
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
