@@ -4,7 +4,7 @@ import datetime
 import logging
 import asyncio
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, CommandHandler, CallbackContext
+from telegram.ext import Application, MessageHandler, filters, CallbackContext
 from flask import Flask, request, jsonify
 import threading
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-TABLE_NAME = "Instructor"
+TABLE_NAME = "Telegram messages"
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 # Airtable API URL
@@ -28,8 +28,6 @@ app = Flask(__name__)
 # Telegram bot application
 bot_app = Application.builder().token(TOKEN).build()
 
-# Store user registration states
-user_states = {}
 
 async def set_webhook():
     """Sets the webhook for Telegram Bot."""
@@ -39,95 +37,122 @@ async def set_webhook():
     else:
         logger.error("❌ ERROR: WEBHOOK_URL is missing!")
 
-def search_airtable(field, value):
-    """Searches Airtable for a matching record."""
-    headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
-    params = {"filterByFormula": f"{{{field}}} = '{value}'"}
-    response = requests.get(AIRTABLE_URL, headers=headers, params=params)
-    if response.status_code == 200:
-        records = response.json().get("records", [])
-        return records[0] if records else None
-    return None
 
-def update_airtable(record_id, telegram_id):
-    """Updates Airtable with the Telegram ID."""
+def save_to_airtable(user_id, name, message):
+    """Saves messages to Airtable and logs the response for debugging."""
     headers = {
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
         "Content-Type": "application/json"
     }
-    data = {"records": [{"id": record_id, "fields": {"Telegram ID": telegram_id}}]}
-    response = requests.patch(AIRTABLE_URL, json=data, headers=headers)
-    return response.status_code == 200
+    data = {
+        "records": [
+            {
+                "fields": {
+                    "User ID": f"{user_id}",  # Ensure ID is stored as a string
+                    "Name": name,
+                    "Message": message,
+                    "Timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                }
+            }
+        ]
+    }
+
+    try:
+        response = requests.post(AIRTABLE_URL, json=data, headers=headers)
+        response_json = response.json()  # Convert response to JSON
+
+        if response.status_code == 200:
+            logger.info(f"✅ Airtable Save Successful: {response_json}")
+            return 200
+        else:
+            logger.error(f"❌ Airtable Save Failed! Status: {response.status_code}, Response: {response_json}")
+            return response.status_code
+    except Exception as e:
+        logger.error(f"🚨 Airtable Request Exception: {e}")
+        return 500
+
+
 
 async def handle_message(update: Update, context: CallbackContext):
     """Handles incoming messages."""
-    user_id = update.message.from_user.id
-    message = update.message.text.strip()
-    chat_id = update.message.chat_id
-    
-    logger.info(f"📩 Message from {user_id}: {message}")
-    
-    if user_id in user_states:
-        step = user_states[user_id]['step']
-        if step == "awaiting_name":
-            record = search_airtable("Name", message)
-            if record:
-                user_states[user_id]['record_id'] = record['id']
-                user_states[user_id]['step'] = "awaiting_email"
-                await update.message.reply_text("✅ Name found! Now, please enter your email.")
-            else:
-                await update.message.reply_text("❌ Name not found in database, please contact office.")
-                del user_states[user_id]
-        elif step == "awaiting_email":
-            record = search_airtable("Email", message)
-            if record and record['id'] == user_states[user_id]['record_id']:
-                success = update_airtable(record['id'], str(user_id))
-                if success:
-                    await update.message.reply_text("✅ Registration complete! Your Telegram ID is now linked.")
-                else:
-                    await update.message.reply_text("❌ Failed to update database. Contact support.")
-                del user_states[user_id]
-            else:
-                await update.message.reply_text("❌ Name/Email mismatch, please try again or contact office.")
-                del user_states[user_id]
-        return
-    
-    if message.lower() in ["add me", "register", "link", "signup"]:
-        user_states[user_id] = {"step": "awaiting_name"}
-        await update.message.reply_text("🔍 Please enter your full name as in the database.")
-    else:
-        await update.message.reply_text("ℹ️ Send 'add me' or 'register' to link your Telegram ID.")
+    try:
+        user = update.message.from_user
+        user_id = user.id
+        name = f"{user.first_name} {user.last_name or ''}".strip()
+        message = update.message.text
+
+        logger.info(f"📩 Message from {name} ({user_id}): {message}")
+
+        # Save to Airtable
+        status = save_to_airtable(user_id, name, message)
+
+        if status == 200:
+            await update.message.reply_text("✅ Your message has been saved!")
+        else:
+            await update.message.reply_text("❌ Failed to save your message.")
+    except Exception as e:
+        logger.error(f"🚨 Message Handling Error: {e}")
+
 
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
-    """Handles incoming Telegram updates."""
+    """Handles incoming Telegram updates safely."""
     try:
         json_data = request.get_json()
         logger.info(f"📩 Incoming Webhook Data: {json_data}")
+
         update = Update.de_json(json_data, bot_app.bot)
-        asyncio.run(bot_app.process_update(update))
+
+        # **Properly handle the event loop**
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        loop.run_until_complete(bot_app.process_update(update))
+
         return jsonify({"status": "success"}), 200
     except Exception as e:
-        logger.error(f"🚨 Webhook Error: {e}")
+        logger.error(f"🚨 Webhook Processing Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 @app.route('/')
 def home():
     return "Bot is running!"
+
 
 def start_flask():
     """Runs the Flask server in a separate thread."""
     port = int(os.getenv("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=False)
 
+
 def start_bot():
     """Starts the Telegram bot with webhook mode."""
-    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(bot_app.initialize())
-    loop.run_until_complete(set_webhook())
-    logger.info("✅ Webhook is ready. Running bot with Flask...")
-    threading.Thread(target=start_flask).start()
+    try:
+        bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+        # **Ensure the event loop is properly handled**
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        loop.run_until_complete(bot_app.initialize())
+        loop.run_until_complete(set_webhook())
+
+        logger.info("✅ Webhook is ready. Running bot with Flask...")
+        threading.Thread(target=start_flask, daemon=True).start()
+
+        # **Keep bot running indefinitely**
+        loop.run_forever()
+
+    except Exception as e:
+        logger.error(f"🚨 Bot Startup Error: {e}")
+
 
 if __name__ == "__main__":
     start_bot()
