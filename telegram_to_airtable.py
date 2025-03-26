@@ -98,9 +98,11 @@ def telegram_webhook():
     data = request.get_json()
     update = Update.de_json(data, app.bot)
 
-    # ✅ Process the update safely using the running event loop
-    loop = asyncio.get_event_loop()
-    asyncio.run_coroutine_threadsafe(app.process_update(update), loop)
+    # ✅ Ensure an event loop is available in the thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(app.process_update(update))
+    loop.close()
 
     return "OK", 200
 
