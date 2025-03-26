@@ -48,7 +48,7 @@ def save_to_airtable(user_id, name, message):
         "records": [
             {
                 "fields": {
-                    "User ID": str(user_id),  # Ensure ID is a string
+                    "User ID": f"{user_id}",  # Ensure ID is stored as a string
                     "Name": name,
                     "Message": message,
                     "Timestamp": datetime.datetime.utcnow().isoformat()  # Use UTC time
