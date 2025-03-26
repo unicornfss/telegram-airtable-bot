@@ -19,6 +19,7 @@ AIRTABLE_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
 
 # Initialize the bot application globally
 app = Application.builder().token(TOKEN).build()
+app.initialize()  # ✅ Initialize the application BEFORE handling requests
 
 # Function to save messages to Airtable
 def save_to_airtable(user_id, name, message):
@@ -70,9 +71,6 @@ def start_bot():
     # Add handler for text messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # ✅ Properly initialize the application
-    app.initialize()
-
     # ✅ Ensure there's a running event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -91,12 +89,18 @@ def home():
 def telegram_webhook():
     """ Handle incoming Telegram messages via webhook """
     data = request.get_json()
-    update = Update.de_json(data, app.bot)
+    print(f"🔍 Received Webhook Data: {data}")  # Debugging log
 
-    # ✅ Process the update safely using the running event loop
-    asyncio.run_coroutine_threadsafe(app.process_update(update), app._loop)
+    try:
+        update = Update.de_json(data, app.bot)
 
-    return "OK", 200
+        # ✅ Process the update safely using the running event loop
+        asyncio.run_coroutine_threadsafe(app.process_update(update), app._loop)
+
+        return "OK", 200
+    except Exception as e:
+        print(f"❌ Webhook Processing Error: {e}")  # Debugging log
+        return "Error", 500
 
 def run_flask():
     port = int(os.getenv("PORT", 8080))
