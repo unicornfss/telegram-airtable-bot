@@ -51,7 +51,7 @@ def save_to_airtable(user_id, name, message):
                     "User ID": f"{user_id}",  # Ensure ID is stored as a string
                     "Name": name,
                     "Message": message,
-                    "Timestamp": datetime.datetime.now().isoformat(timespec='seconds')
+                    "Timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
                 }
             }
         ]
