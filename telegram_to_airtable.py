@@ -52,13 +52,18 @@ async def handle_message(update: Update, context: CallbackContext):
     name = f"{user.first_name} {user.last_name or ''}".strip()
     message = update.message.text
 
-    # Save the message in Airtable
+    print(f"📩 New Message Received: {message} from {name} (ID: {user_id})")
+
+    # Save to Airtable
     status = save_to_airtable(user_id, name, message)
 
     if status == 200:
+        print("✅ Message saved to Airtable!")
         await update.message.reply_text("✅ Your message has been saved!")
     else:
+        print("❌ Airtable save failed!")
         await update.message.reply_text("❌ Failed to save your message.")
+
 
 # ✅ Function to set up the webhook
 async def set_webhook():
