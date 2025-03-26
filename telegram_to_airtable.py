@@ -87,16 +87,16 @@ def home():
     return "Bot is running!"
 
 @flask_app.route('/webhook', methods=['POST'])
-async def telegram_webhook():
+def telegram_webhook():
     """ Handle incoming Telegram messages via webhook """
-    data = await request.get_json()  # ✅ Use 'await' since it's an async function
+    data = request.get_json()
     print(f"🔍 Received Webhook Data: {data}")  # Debugging log
 
     try:
         update = Update.de_json(data, app.bot)
 
-        # ✅ Run the update processing safely
-        await app.process_update(update)
+        # ✅ Run the update processing using Flask’s async-to-sync helper
+        loop.create_task(app.process_update(update))
 
         return "OK", 200
     except Exception as e:
